@@ -1,0 +1,91 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Dark background -->
+    <path
+        android:fillColor="#1C1C2E"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"/>
+
+    <!-- White mask body -->
+    <path
+        android:fillColor="#F0F0F0"
+        android:pathData="M54,8 C30,8 20,26 20,48 C20,70 30,86 54,90 C78,86 88,70 88,48 C88,26 78,8 54,8 Z"/>
+
+    <!-- Mask edge shadow -->
+    <path
+        android:strokeColor="#BBBBBB"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:pathData="M54,8 C30,8 20,26 20,48 C20,70 30,86 54,90 C78,86 88,70 88,48 C88,26 78,8 54,8 Z"/>
+
+    <!-- Left eye hole -->
+    <path
+        android:fillColor="#111111"
+        android:pathData="M27,36 C25,36 23,38 23,41 L23,52 C23,55 25,57 27,57 L47,57 C49,57 51,55 51,52 L51,41 C51,38 49,36 47,36 Z"/>
+
+    <!-- Right eye hole -->
+    <path
+        android:fillColor="#111111"
+        android:pathData="M61,36 C59,36 57,38 57,41 L57,52 C57,55 59,57 61,57 L81,57 C83,57 85,55 85,52 L85,41 C85,38 83,36 81,36 Z"/>
+
+    <!-- Nose holes -->
+    <path
+        android:fillColor="#2A2A2A"
+        android:pathData="M48,63 C47,63 46,64 46,65 L46,68 C46,69 47,70 48,70 L51,70 C52,70 53,69 53,68 L53,65 C53,64 52,63 51,63 Z"/>
+    <path
+        android:fillColor="#2A2A2A"
+        android:pathData="M57,63 C56,63 55,64 55,65 L55,68 C55,69 56,70 57,70 L60,70 C61,70 62,69 62,68 L62,65 C62,64 61,63 60,63 Z"/>
+
+    <!-- RED: Center vertical stripe -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="5"
+        android:fillColor="#00000000"
+        android:pathData="M54,8 L54,90"/>
+
+    <!-- RED: Eye-level horizontal bar -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="5"
+        android:fillColor="#00000000"
+        android:pathData="M20,47 L88,47"/>
+
+    <!-- RED: Forehead arc -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M30,20 Q54,13 78,20"/>
+
+    <!-- RED: Chin bar -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="3.5"
+        android:fillColor="#00000000"
+        android:pathData="M22,70 Q54,79 86,70"/>
+
+    <!-- RED: Lower chin bar -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M27,83 Q54,90 81,83"/>
+
+    <!-- RED: Left cheek vertical -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M33,57 L31,83"/>
+
+    <!-- RED: Right cheek vertical -->
+    <path
+        android:strokeColor="#CC1100"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M75,57 L77,83"/>
+
+</vector>

@@ -3,6 +3,7 @@ package com.example.minimalapp.conchat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,15 +31,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -58,10 +69,38 @@ fun ConchatScreen(vm: ConchatViewModel = viewModel()) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("conchat") },
+                modifier = Modifier.height(52.dp),
+                title = { },
                 actions = {
-                    TextButton(onClick = { menuExpanded = true }) {
-                        Text("Меню")
+                    if (state.currentScreen == MainScreen.CHAT) {
+                        val isDisconnectedOrError = !state.isPolling || state.status.contains("ошибка", ignoreCase = true)
+                        val connectTint = if (isDisconnectedOrError) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                        }
+
+                        IconButton(onClick = vm::connectAndStart) {
+                            Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = "Подключить",
+                                tint = connectTint
+                            )
+                        }
+
+                        IconButton(onClick = vm::stopPolling) {
+                            Icon(
+                                imageVector = Icons.Filled.Stop,
+                                contentDescription = "Стоп"
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.MoreVert,
+                            contentDescription = "Меню"
+                        )
                     }
                     DropdownMenu(
                         expanded = menuExpanded,
@@ -99,8 +138,6 @@ fun ConchatScreen(vm: ConchatViewModel = viewModel()) {
 
             MainScreen.CHAT -> ChatContent(
                 state = state,
-                onConnect = vm::connectAndStart,
-                onStop = vm::stopPolling,
                 onInputChange = vm::setInputMessage,
                 onNicknameClick = vm::addNicknameToInput,
                 onSend = vm::sendCurrentMessage,
@@ -137,7 +174,6 @@ private fun LoginContent(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("conchat", style = MaterialTheme.typography.headlineLarge)
         Text("leprosorium.ru", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(32.dp))
         OutlinedTextField(
@@ -189,8 +225,6 @@ private fun LoginContent(
 @Composable
 private fun ChatContent(
     state: ConchatUiState,
-    onConnect: () -> Unit,
-    onStop: () -> Unit,
     onInputChange: (String) -> Unit,
     onNicknameClick: (String) -> Unit,
     onSend: () -> Unit,
@@ -205,15 +239,6 @@ private fun ChatContent(
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = state.status, style = MaterialTheme.typography.bodySmall)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onConnect) {
-                Text(if (state.isPolling) "Работает" else "Подключить")
-            }
-            Button(onClick = onStop) { Text("Стоп") }
-        }
-
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -308,6 +333,7 @@ private fun MessageCard(
     myName: String,
     onNicknameClick: (String) -> Unit
 ) {
+    val uriHandler = LocalUriHandler.current
     val isMine = myName.isNotBlank() && message.login == myName
     val stamp = if (message.createdUnix > 0) {
         val format = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -316,7 +342,9 @@ private fun MessageCard(
         "--:--"
     }
 
-    val cardColors = if (message.isMention) {
+    val cardColors = if (message.isSystem) {
+        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    } else if (message.isMention) {
         CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
     } else {
         CardDefaults.cardColors()
@@ -330,17 +358,90 @@ private fun MessageCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary
                 )
-                Text(
-                    text = message.login,
-                    modifier = Modifier.clickable { onNicknameClick(message.login) },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (isMine) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                )
+                if (message.isSystem) {
+                    Text(
+                        text = message.login,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                } else {
+                    Text(
+                        text = message.login,
+                        modifier = Modifier.clickable { onNicknameClick(message.login) },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (isMine) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                }
             }
-            Text(text = message.body, style = MaterialTheme.typography.bodyMedium)
+            LinkifiedMessageText(
+                text = message.body,
+                onLinkClick = { rawUrl ->
+                    val normalized = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+                        rawUrl
+                    } else {
+                        "https://$rawUrl"
+                    }
+                    uriHandler.openUri(normalized)
+                }
+            )
             if (message.isMention) {
                 Text("Упоминание", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
 }
+
+@Composable
+private fun LinkifiedMessageText(
+    text: String,
+    onLinkClick: (String) -> Unit
+) {
+    val linkColor = MaterialTheme.colorScheme.primary
+    val annotated = remember(text, linkColor) {
+        buildAnnotatedString {
+            var cursor = 0
+            URL_REGEX.findAll(text).forEach { match ->
+                val start = match.range.first
+                val endExclusive = match.range.last + 1
+
+                if (start > cursor) {
+                    append(text.substring(cursor, start))
+                }
+
+                val url = match.value
+                pushStringAnnotation(tag = URL_TAG, annotation = url)
+                pushStyle(
+                    SpanStyle(
+                        color = linkColor,
+                        textDecoration = TextDecoration.Underline
+                    )
+                )
+                append(url)
+                pop()
+                pop()
+
+                cursor = endExclusive
+            }
+
+            if (cursor < text.length) {
+                append(text.substring(cursor))
+            }
+        }
+    }
+
+    ClickableText(
+        text = annotated,
+        style = MaterialTheme.typography.bodyMedium.copy(
+            color = MaterialTheme.colorScheme.onSurface
+        ),
+        onClick = { offset ->
+            annotated
+                .getStringAnnotations(tag = URL_TAG, start = offset, end = offset)
+                .firstOrNull()
+                ?.let { onLinkClick(it.item) }
+        }
+    )
+}
+
+private const val URL_TAG = "URL"
+private val URL_REGEX = Regex("(https?://|www\\.)[\\w\\-._~:/?#\\[\\]@!$&'()*+,;=%]+")

@@ -8,7 +8,7 @@ import org.json.JSONObject
 class ConchatApi(
     private val client: OkHttpClient = OkHttpClient()
 ) {
-    fun loadMessages(settings: ChatSettings, lastMessageId: Long): List<ChatMessage> {
+    fun loadMessages(settings: ChatSettings, lastMessageId: Long): LoadMessagesResult {
         val hostPrefix = normalizedSublepra(settings.subLepra)
         val url = "https://${hostPrefix}leprosorium.ru/ajax/chat/load/"
 
@@ -24,39 +24,46 @@ class ConchatApi(
             .addHeader("User-Agent", "ConchatAndroid/1.0")
             .build()
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                return emptyList()
-            }
-            val body = response.body?.string().orEmpty()
-            if (body.isBlank()) {
-                return emptyList()
-            }
-
-            val root = JSONObject(body)
-            if (!root.has("messages")) {
-                return emptyList()
-            }
-
-            val messagesArray = root.getJSONArray("messages")
-            val result = mutableListOf<ChatMessage>()
-            for (i in 0 until messagesArray.length()) {
-                val item = messagesArray.getJSONObject(i)
-                val user = item.optJSONObject("user")
-                result.add(
-                    ChatMessage(
-                        id = item.optLong("id", 0L),
-                        login = user?.optString("login").orEmpty(),
-                        body = item.optString("body", ""),
-                        createdUnix = item.optLong("created", 0L)
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return LoadMessagesResult(
+                        errorCode = response.code,
+                        errorMessage = "HTTP ${response.code}"
                     )
-                )
+                }
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) {
+                    return LoadMessagesResult(messages = emptyList())
+                }
+
+                val root = JSONObject(body)
+                if (!root.has("messages")) {
+                    return LoadMessagesResult(messages = emptyList())
+                }
+
+                val messagesArray = root.getJSONArray("messages")
+                val result = mutableListOf<ChatMessage>()
+                for (i in 0 until messagesArray.length()) {
+                    val item = messagesArray.getJSONObject(i)
+                    val user = item.optJSONObject("user")
+                    result.add(
+                        ChatMessage(
+                            id = item.optLong("id", 0L),
+                            login = user?.optString("login").orEmpty(),
+                            body = item.optString("body", ""),
+                            createdUnix = item.optLong("created", 0L)
+                        )
+                    )
+                }
+                LoadMessagesResult(messages = result)
             }
-            return result
+        } catch (e: Exception) {
+            LoadMessagesResult(errorMessage = e.message ?: "NETWORK")
         }
     }
 
-    fun sendMessage(settings: ChatSettings, lastMessageId: Long, message: String): Boolean {
+    fun sendMessage(settings: ChatSettings, lastMessageId: Long, message: String): SendMessageResult {
         val hostPrefix = normalizedSublepra(settings.subLepra)
         val url = "https://${hostPrefix}leprosorium.ru/ajax/chat/add/"
 
@@ -73,8 +80,20 @@ class ConchatApi(
             .addHeader("User-Agent", "ConchatAndroid/1.0")
             .build()
 
-        client.newCall(request).execute().use { response ->
-            return response.isSuccessful
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    SendMessageResult(success = true)
+                } else {
+                    SendMessageResult(
+                        success = false,
+                        errorCode = response.code,
+                        errorMessage = "HTTP ${response.code}"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            SendMessageResult(success = false, errorMessage = e.message ?: "NETWORK")
         }
     }
 

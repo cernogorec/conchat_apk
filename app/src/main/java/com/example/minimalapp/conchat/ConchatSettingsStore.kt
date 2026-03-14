@@ -2,6 +2,8 @@ package com.example.minimalapp.conchat
 
 import android.content.Context
 import androidx.core.content.edit
+import org.json.JSONArray
+import org.json.JSONObject
 
 class ConchatSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -42,6 +44,72 @@ class ConchatSettingsStore(context: Context) {
         }
     }
 
+    fun loadMessages(): List<ChatMessage> {
+        val raw = prefs.getString(KEY_MESSAGES, null).orEmpty()
+        if (raw.isBlank()) {
+            return emptyList()
+        }
+
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    add(
+                        ChatMessage(
+                            id = item.optLong("id", 0L),
+                            login = item.optString("login", ""),
+                            body = item.optString("body", ""),
+                            createdUnix = item.optLong("createdUnix", 0L),
+                            isMention = item.optBoolean("isMention", false),
+                            isSystem = item.optBoolean("isSystem", false)
+                        )
+                    )
+                }
+            }
+                .filter { it.id > 0L }
+                .sortedBy { it.id }
+                .takeLast(MAX_STORED_MESSAGES)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveMessages(messages: List<ChatMessage>) {
+        val normalized = messages
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+            .takeLast(MAX_STORED_MESSAGES)
+
+        val array = JSONArray()
+        normalized.forEach { message ->
+            array.put(
+                JSONObject().apply {
+                    put("id", message.id)
+                    put("login", message.login)
+                    put("body", message.body)
+                    put("createdUnix", message.createdUnix)
+                    put("isMention", message.isMention)
+                    put("isSystem", message.isSystem)
+                }
+            )
+        }
+
+        prefs.edit {
+            putString(KEY_MESSAGES, array.toString())
+        }
+    }
+
+    fun loadLastMessageId(): Long {
+        return prefs.getLong(KEY_LAST_MESSAGE_ID, 1400000L)
+    }
+
+    fun saveLastMessageId(id: Long) {
+        prefs.edit {
+            putLong(KEY_LAST_MESSAGE_ID, id)
+        }
+    }
+
     private companion object {
         const val PREFS_NAME = "conchat_settings"
         const val KEY_UID = "uid"
@@ -57,5 +125,8 @@ class ConchatSettingsStore(context: Context) {
         const val KEY_YDOWNLOAD = "ydownload"
         const val KEY_SAY = "say"
         const val KEY_SILENT = "silent"
+        const val KEY_MESSAGES = "messages"
+        const val KEY_LAST_MESSAGE_ID = "last_message_id"
+        const val MAX_STORED_MESSAGES = 300
     }
 }

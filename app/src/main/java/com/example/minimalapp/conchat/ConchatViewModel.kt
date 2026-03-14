@@ -43,8 +43,20 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
     private val store = ConchatSettingsStore(application)
     private val api = ConchatApi()
 
+    private val initialMessages = store.loadMessages()
+    private val initialLastMessageId = maxOf(
+        1400000L,
+        store.loadLastMessageId(),
+        initialMessages.maxOfOrNull { it.id } ?: 0L
+    )
+
     private val _uiState = MutableStateFlow(
-        ConchatUiState(settings = store.load())
+        ConchatUiState(
+            settings = store.load(),
+            messages = initialMessages,
+            lastMessageId = initialLastMessageId,
+            status = if (initialMessages.isEmpty()) "Не подключено" else "Загружено: ${initialMessages.size} сообщений"
+        )
     )
     val uiState: StateFlow<ConchatUiState> = _uiState.asStateFlow()
 
@@ -137,6 +149,7 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun connectAndStart() {
+        ConchatSyncWorker.schedule(getApplication())
         if (pollingJob?.isActive == true) {
             return
         }
@@ -152,6 +165,7 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
     fun stopPolling() {
         pollingJob?.cancel()
         pollingJob = null
+        ConchatSyncWorker.cancel(getApplication())
         _uiState.update { it.copy(isPolling = false, status = "Остановлено") }
     }
 
@@ -172,9 +186,10 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch {
-            val sent = withContext(Dispatchers.IO) {
+            val sendResult = withContext(Dispatchers.IO) {
                 api.sendMessage(_uiState.value.settings, _uiState.value.lastMessageId, text)
             }
+            val sent = sendResult.success
             _uiState.update {
                 it.copy(
                     inputMessage = "",
@@ -183,6 +198,8 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             }
             if (sent) {
                 loadOnce()
+            } else {
+                appendSystemErrorMessage(sendResult.errorCode, sendResult.errorMessage)
             }
         }
     }
@@ -194,18 +211,26 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        val loaded = withContext(Dispatchers.IO) {
+        val loadResult = withContext(Dispatchers.IO) {
             api.loadMessages(state.settings, state.lastMessageId)
         }
 
+        if (loadResult.errorCode != null || loadResult.errorMessage.isNotBlank()) {
+            _uiState.update { it.copy(status = "Ошибка сети") }
+            appendSystemErrorMessage(loadResult.errorCode, loadResult.errorMessage)
+            return
+        }
+
+        val loaded = loadResult.messages
+
         if (loaded.isEmpty()) {
-            _uiState.update { it.copy(status = "Подключено, новых сообщений нет") }
+            _uiState.update { it.copy(status = "") }
             return
         }
 
         val myNameLower = state.settings.name.trim().lowercase()
         val decoded = loaded.map { msg ->
-            val parsedBody = if (_uiState.value.settings.plaintext) {
+            val parsedBody = if (state.settings.plaintext) {
                 Html.fromHtml(msg.body, Html.FROM_HTML_MODE_LEGACY).toString()
             } else {
                 msg.body
@@ -217,21 +242,33 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             msg.copy(body = decodedText, isMention = isMention)
         }
 
-        val newMentions = decoded.filter { it.id > state.lastMessageId && it.isMention }
+        val existingIds = state.messages.asSequence().map { it.id }.toHashSet()
+        val onlyNew = decoded.filterNot { it.id in existingIds }
+
+        if (onlyNew.isEmpty()) {
+            _uiState.update { it.copy(status = "") }
+            return
+        }
+
+        val newMentions = onlyNew.filter { it.id > state.lastMessageId && it.isMention }
         if (newMentions.isNotEmpty()) {
             speakMentions(newMentions)
             _mentionEvent.tryEmit(Unit)
         }
 
-        val merged = (_uiState.value.messages + decoded)
+        val merged = (state.messages + onlyNew)
             .distinctBy { it.id }
             .sortedBy { it.id }
             .takeLast(300)
 
+        val newLastMessageId = merged.filterNot { it.isSystem }.maxOfOrNull { m -> m.id } ?: state.lastMessageId
+        store.saveMessages(merged)
+        store.saveLastMessageId(newLastMessageId)
+
         _uiState.update {
             it.copy(
                 messages = merged,
-                lastMessageId = merged.maxOfOrNull { m -> m.id } ?: it.lastMessageId,
+                lastMessageId = newLastMessageId,
                 status = "Подключено: ${merged.size} сообщений"
             )
         }
@@ -312,6 +349,29 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("ru", "RU")
             }
+        }
+    }
+
+    private fun appendSystemErrorMessage(errorCode: Int?, errorMessage: String) {
+        val codeText = errorCode?.toString() ?: "NETWORK"
+        val details = errorMessage.ifBlank { "Ошибка сети" }
+        val systemMessage = ChatMessage(
+            id = System.currentTimeMillis(),
+            login = "system",
+            body = "Ошибка сети (код $codeText): $details",
+            createdUnix = System.currentTimeMillis() / 1000,
+            isSystem = true
+        )
+
+        val merged = (_uiState.value.messages + systemMessage)
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+            .takeLast(300)
+
+        store.saveMessages(merged)
+
+        _uiState.update {
+            it.copy(messages = merged)
         }
     }
 

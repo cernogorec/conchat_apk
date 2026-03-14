@@ -21,7 +21,20 @@ data class ChatMessage(
     val login: String,
     val body: String,
     val createdUnix: Long,
-    val isMention: Boolean = false
+    val isMention: Boolean = false,
+    val isSystem: Boolean = false
+)
+
+data class LoadMessagesResult(
+    val messages: List<ChatMessage> = emptyList(),
+    val errorCode: Int? = null,
+    val errorMessage: String = ""
+)
+
+data class SendMessageResult(
+    val success: Boolean,
+    val errorCode: Int? = null,
+    val errorMessage: String = ""
 )
 
 data class LoginResult(

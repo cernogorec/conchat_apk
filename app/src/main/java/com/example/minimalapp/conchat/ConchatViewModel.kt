@@ -5,6 +5,7 @@ import android.speech.tts.TextToSpeech
 import android.text.Html
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -44,10 +45,13 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
     private val api = ConchatApi()
 
     private val initialMessages = store.loadMessages()
+    private val initialChatMessageId = initialMessages
+        .filterNot { it.isSystem }
+        .maxOfOrNull { it.id } ?: 0L
     private val initialLastMessageId = maxOf(
         1400000L,
         store.loadLastMessageId(),
-        initialMessages.maxOfOrNull { it.id } ?: 0L
+        initialChatMessageId
     )
 
     private val _uiState = MutableStateFlow(
@@ -81,11 +85,20 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openChat() {
-        _uiState.update { it.copy(currentScreen = MainScreen.CHAT) }
+        if (hasRequiredCredentials(_uiState.value.settings)) {
+            _uiState.update { it.copy(currentScreen = MainScreen.CHAT, loginError = "") }
+            connectAndStart()
+        } else {
+            _uiState.update { it.copy(currentScreen = MainScreen.LOGIN) }
+        }
     }
 
     fun openLogin() {
-        _uiState.update { it.copy(currentScreen = MainScreen.LOGIN) }
+        if (hasRequiredCredentials(_uiState.value.settings)) {
+            openChat()
+        } else {
+            _uiState.update { it.copy(currentScreen = MainScreen.LOGIN) }
+        }
     }
 
     fun setLoginUsername(value: String) {
@@ -111,6 +124,7 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
                     s.copy(
                         uid = result.uid,
                         sid = result.sid,
+                        session = result.session,
                         csrfToken = result.csrfToken,
                         name = username
                     )
@@ -156,7 +170,14 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
         pollingJob = viewModelScope.launch {
             _uiState.update { it.copy(status = "Подключение...", isPolling = true) }
             while (true) {
-                loadOnce()
+                try {
+                    loadOnce()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    _uiState.update { it.copy(status = "Ошибка сети, повтор через 11 сек") }
+                    appendSystemErrorMessage(null, e.message ?: "Неизвестная ошибка загрузки")
+                }
                 delay(11_000)
             }
         }
@@ -211,20 +232,30 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
+        val requestLastMessageId = maxOf(0L, state.lastMessageId - MESSAGE_ID_LOOKBACK)
+
         val loadResult = withContext(Dispatchers.IO) {
-            api.loadMessages(state.settings, state.lastMessageId)
+            api.loadMessages(state.settings, requestLastMessageId)
         }
 
         if (loadResult.errorCode != null || loadResult.errorMessage.isNotBlank()) {
-            _uiState.update { it.copy(status = "Ошибка сети") }
+            _uiState.update { it.copy(status = formatRetryStatus(loadResult.errorCode, loadResult.errorMessage)) }
             appendSystemErrorMessage(loadResult.errorCode, loadResult.errorMessage)
             return
         }
 
+        val cleanedCurrent = state.messages.filterNot { isNetworkSystemError(it) }
+        val shouldPersistCleanedCurrent = cleanedCurrent.size != state.messages.size
+
         val loaded = loadResult.messages
 
         if (loaded.isEmpty()) {
-            _uiState.update { it.copy(status = "") }
+            if (shouldPersistCleanedCurrent) {
+                store.saveMessages(cleanedCurrent)
+                _uiState.update { it.copy(messages = cleanedCurrent, status = "") }
+            } else {
+                _uiState.update { it.copy(status = "") }
+            }
             return
         }
 
@@ -242,11 +273,16 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             msg.copy(body = decodedText, isMention = isMention)
         }
 
-        val existingIds = state.messages.asSequence().map { it.id }.toHashSet()
+        val existingIds = cleanedCurrent.asSequence().map { it.id }.toHashSet()
         val onlyNew = decoded.filterNot { it.id in existingIds }
 
         if (onlyNew.isEmpty()) {
-            _uiState.update { it.copy(status = "") }
+            if (shouldPersistCleanedCurrent) {
+                store.saveMessages(cleanedCurrent)
+                _uiState.update { it.copy(messages = cleanedCurrent, status = "") }
+            } else {
+                _uiState.update { it.copy(status = "") }
+            }
             return
         }
 
@@ -256,7 +292,7 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
             _mentionEvent.tryEmit(Unit)
         }
 
-        val merged = (state.messages + onlyNew)
+        val merged = (cleanedCurrent + onlyNew)
             .distinctBy { it.id }
             .sortedBy { it.id }
             .takeLast(300)
@@ -278,6 +314,10 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
         return settings.uid.isNotBlank() &&
             settings.sid.isNotBlank() &&
             settings.csrfToken.isNotBlank()
+    }
+
+    private fun isNetworkSystemError(message: ChatMessage): Boolean {
+        return message.isSystem && message.body.startsWith("Ошибка сети")
     }
 
     private fun applyCommand(text: String): Boolean {
@@ -355,16 +395,18 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
     private fun appendSystemErrorMessage(errorCode: Int?, errorMessage: String) {
         val codeText = errorCode?.toString() ?: "NETWORK"
         val details = errorMessage.ifBlank { "Ошибка сети" }
+        val messageBody = "Ошибка сети (код $codeText): $details"
         val systemMessage = ChatMessage(
             id = System.currentTimeMillis(),
             login = "system",
-            body = "Ошибка сети (код $codeText): $details",
+            body = messageBody,
             createdUnix = System.currentTimeMillis() / 1000,
             isSystem = true
         )
 
-        val merged = (_uiState.value.messages + systemMessage)
-            .distinctBy { it.id }
+        val merged = _uiState.value.messages
+            .filterNot { it.isSystem && it.login == "system" && it.body.startsWith("Ошибка сети") }
+            .plus(systemMessage)
             .sortedBy { it.id }
             .takeLast(300)
 
@@ -372,6 +414,16 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
 
         _uiState.update {
             it.copy(messages = merged)
+        }
+    }
+
+    private fun formatRetryStatus(errorCode: Int?, errorMessage: String): String {
+        return when {
+            errorCode != null -> "Ошибка сети: HTTP $errorCode, повтор через 11 сек"
+            errorMessage.contains("Unable to resolve host", ignoreCase = true) -> {
+                "Ошибка сети: не удаётся определить адрес, повтор через 11 сек"
+            }
+            else -> "Ошибка сети, повтор через 11 сек"
         }
     }
 
@@ -391,5 +443,9 @@ class ConchatViewModel(application: Application) : AndroidViewModel(application)
         super.onCleared()
         tts?.stop()
         tts?.shutdown()
+    }
+
+    private companion object {
+        const val MESSAGE_ID_LOOKBACK = 50L
     }
 }

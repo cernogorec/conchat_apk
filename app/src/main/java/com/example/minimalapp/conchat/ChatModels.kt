@@ -41,6 +41,7 @@ data class LoginResult(
     val success: Boolean,
     val uid: String = "",
     val sid: String = "",
+    val session: String = "",
     val csrfToken: String = "",
     val errorMessage: String = ""
 )

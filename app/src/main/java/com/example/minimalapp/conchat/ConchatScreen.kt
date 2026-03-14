@@ -59,6 +59,9 @@ import java.util.Locale
 fun ConchatScreen(vm: ConchatViewModel = viewModel()) {
     val state by vm.uiState.collectAsState()
     var menuExpanded by remember { mutableStateOf(false) }
+    val isAuthorized = state.settings.uid.isNotBlank() &&
+        state.settings.sid.isNotBlank() &&
+        state.settings.csrfToken.isNotBlank()
 
     LaunchedEffect(Unit) {
         vm.mentionEvent.collect {
@@ -114,10 +117,12 @@ fun ConchatScreen(vm: ConchatViewModel = viewModel()) {
                             text = { Text("Настройки") },
                             onClick = { vm.openSettings(); menuExpanded = false }
                         )
-                        DropdownMenuItem(
-                            text = { Text("Войти как другой") },
-                            onClick = { vm.openLogin(); menuExpanded = false }
-                        )
+                        if (!isAuthorized) {
+                            DropdownMenuItem(
+                                text = { Text("Войти") },
+                                onClick = { vm.openLogin(); menuExpanded = false }
+                            )
+                        }
                     }
                 }
             )
